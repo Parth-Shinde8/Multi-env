@@ -1,18 +1,55 @@
 name: DevOps CI/CD Pipeline
 
 on:
-push:
-branches:
-- main
+  push:
+    branches:
+      - main
 
 env:
-AWS_REGION: ap-south-1
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: devops-platform-app
+  ECR_REGISTRY: 836479503728.dkr.ecr.ap-south-1.amazonaws.com
 
 jobs:
-test:
-runs-on: ubuntu-latest
-  
-steps:
-  - name: Test
-    run: echo "Pipeline working"
+  build-and-deploy:
+    runs-on: ubuntu-latest
 
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | \
+          docker login --username AWS --password-stdin $ECR_REGISTRY
+
+      - name: Build Docker Image
+        run: |
+          docker build -t devops-app:${{ github.sha }} ./app
+
+      - name: Tag Image
+        run: |
+          docker tag devops-app:${{ github.sha }} \
+          $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+
+      - name: Push Image to ECR
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+
+      - name: Deploy to EC2 (Dev Environment)
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/devops-chart
+            sed -i 's/tag:.*/tag: "${{ github.sha }}"/' values-dev.yaml
+            helm upgrade dev-release . -n dev -f values-dev.yaml
