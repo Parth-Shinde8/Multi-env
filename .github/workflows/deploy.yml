@@ -17,11 +17,17 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      image_tag: ${{ github.sha }}
+      image_tag: ${{ steps.meta.outputs.tag }}
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+
+      - name: Generate Image Tag
+        id: meta
+        run: |
+          TAG="v${{ github.run_number }}-${{ github.sha }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
@@ -37,16 +43,16 @@ jobs:
 
       - name: Build Image
         run: |
-          docker build -t $ECR_REPOSITORY:${{ github.sha }} ./app
+          docker build -t $ECR_REPOSITORY:${{ steps.meta.outputs.tag }} ./app
 
       - name: Tag Image
         run: |
-          docker tag $ECR_REPOSITORY:${{ github.sha }} \
-          $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          docker tag $ECR_REPOSITORY:${{ steps.meta.outputs.tag }} \
+          $ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.tag }}
 
       - name: Push Image
         run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.tag }}
 
   deploy-dev:
     needs: build
@@ -62,7 +68,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ~/devops-chart
-            sed -i 's/tag:.*/tag: "${{ github.sha }}"/' values-dev.yaml
+            sed -i 's/tag:.*/tag: "${{ needs.build.outputs.image_tag }}"/' values-dev.yaml
             helm upgrade dev-release . -n dev -f values-dev.yaml
 
   deploy-staging:
@@ -79,7 +85,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ~/devops-chart
-            sed -i 's/tag:.*/tag: "${{ github.sha }}"/' values-staging.yaml
+            sed -i 's/tag:.*/tag: "${{ needs.build.outputs.image_tag }}"/' values-staging.yaml
             helm upgrade staging-release . -n staging -f values-staging.yaml
 
   deploy-prod:
@@ -97,12 +103,12 @@ jobs:
           script: |
             cd ~/devops-chart
 
-            # Deploy green version
-            sed -i 's/tag:.*/tag: "${{ github.sha }}"/' values-prod.yaml
+            # Deploy GREEN with new version
+            sed -i 's/tag:.*/tag: "${{ needs.build.outputs.image_tag }}"/' values-prod.yaml
             sed -i 's/color:.*/color: green/' values-prod.yaml
             helm upgrade prod-green . -n prod -f values-prod.yaml
 
-            # Switch traffic to green
+            # Switch traffic to GREEN
             kubectl patch svc prod-service -n prod --type='json' -p='[
               {
                 "op": "replace",
