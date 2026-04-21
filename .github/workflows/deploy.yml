@@ -1,8 +1,10 @@
-name: DevOps CI/CD Pipeline
+name: Multi-Env DevOps Pipeline
 
 on:
   push:
     branches:
+      - dev
+      - staging
       - main
 
 env:
@@ -11,8 +13,11 @@ env:
   ECR_REGISTRY: 836479503728.dkr.ecr.ap-south-1.amazonaws.com
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
+
+    outputs:
+      image_tag: ${{ github.sha }}
 
     steps:
       - name: Checkout Code
@@ -25,25 +30,31 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
+      - name: Login to ECR
         run: |
           aws ecr get-login-password --region $AWS_REGION | \
           docker login --username AWS --password-stdin $ECR_REGISTRY
 
-      - name: Build Docker Image
+      - name: Build Image
         run: |
-          docker build -t devops-app:${{ github.sha }} ./app
+          docker build -t $ECR_REPOSITORY:${{ github.sha }} ./app
 
       - name: Tag Image
         run: |
-          docker tag devops-app:${{ github.sha }} \
+          docker tag $ECR_REPOSITORY:${{ github.sha }} \
           $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
 
-      - name: Push Image to ECR
+      - name: Push Image
         run: |
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
 
-      - name: Deploy to EC2 (Dev Environment)
+  deploy-dev:
+    needs: build
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Dev
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.EC2_IP }}
@@ -53,3 +64,53 @@ jobs:
             cd ~/devops-chart
             sed -i 's/tag:.*/tag: "${{ github.sha }}"/' values-dev.yaml
             helm upgrade dev-release . -n dev -f values-dev.yaml
+
+  deploy-staging:
+    needs: build
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Staging
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/devops-chart
+            sed -i 's/tag:.*/tag: "${{ github.sha }}"/' values-staging.yaml
+            helm upgrade staging-release . -n staging -f values-staging.yaml
+
+  deploy-prod:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Prod (Blue-Green)
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/devops-chart
+
+            # Deploy green version
+            sed -i 's/tag:.*/tag: "${{ github.sha }}"/' values-prod.yaml
+            sed -i 's/color:.*/color: green/' values-prod.yaml
+            helm upgrade prod-green . -n prod -f values-prod.yaml
+
+            # Switch traffic to green
+            kubectl patch svc prod-service -n prod --type='json' -p='[
+              {
+                "op": "replace",
+                "path": "/spec/selector",
+                "value": {
+                  "app.kubernetes.io/name": "devops-chart",
+                  "app.kubernetes.io/instance": "prod-green",
+                  "color": "green"
+                }
+              }
+            ]'
