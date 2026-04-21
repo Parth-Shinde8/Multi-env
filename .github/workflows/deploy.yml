@@ -14,7 +14,6 @@ jobs:
 build-and-deploy:
 runs-on: ubuntu-latest
 
-```
 steps:
   - name: Checkout Code
     uses: actions/checkout@v3
@@ -28,8 +27,7 @@ steps:
 
   - name: Login to Amazon ECR
     run: |
-      aws ecr get-login-password --region $AWS_REGION | \
-      docker login --username AWS --password-stdin $ECR_REGISTRY
+      aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
   - name: Build Docker Image
     run: |
@@ -37,8 +35,7 @@ steps:
 
   - name: Tag Image
     run: |
-      docker tag devops-app:${{ github.sha }} \
-      $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+      docker tag devops-app:${{ github.sha }} $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
 
   - name: Push Image to ECR
     run: |
@@ -54,4 +51,3 @@ steps:
         cd ~/devops-chart
         sed -i 's/tag:.*/tag: "${{ github.sha }}"/' values-dev.yaml
         helm upgrade dev-release . -n dev -f values-dev.yaml
-```
