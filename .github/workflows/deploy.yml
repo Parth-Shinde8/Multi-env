@@ -98,22 +98,22 @@ jobs:
           script: |
             cd ~/devops-chart
 
-            echo "🚀 Deploying GREEN version"
+            echo " Deploying GREEN version"
 
             sed -i 's/tag:.*/tag: "${{ needs.build.outputs.image_tag }}"/' values-prod.yaml
             sed -i 's/color:.*/color: green/' values-prod.yaml
-            helm upgrade prod-green . -n prod -f values-prod.yaml
+            helm upgrade --install prod-green . -n prod -f values-prod.yaml
 
-            echo "⏳ Waiting for pods..."
+            echo "Waiting for pods..."
             sleep 20
 
             SERVICE_IP=$(kubectl get svc prod-service -n prod -o jsonpath='{.spec.clusterIP}')
 
-            echo "🔍 Running health check..."
+            echo "Running health check..."
             curl -f http://$SERVICE_IP:3000 || FAILED=true
 
             if [ "$FAILED" = true ]; then
-              echo "❌ Health check failed → Rolling back to BLUE"
+              echo "Health check failed → Rolling back to BLUE"
               kubectl patch svc prod-service -n prod --type='json' -p='[
                 {
                   "op": "replace",
@@ -127,7 +127,7 @@ jobs:
               ]'
               exit 1
             else
-              echo "✅ Health check passed → Switching to GREEN"
+              echo "Health check passed → Switching to GREEN"
               kubectl patch svc prod-service -n prod --type='json' -p='[
                 {
                   "op": "replace",
