@@ -25,6 +25,8 @@ GitHub → GitHub Actions → Docker Build → AWS ECR → Kubernetes (k3s)
                                      Helm Deployments
                                                ↓
                                 Blue-Green Production Strategy
+<img width="911" height="530" alt="image" src="https://github.com/user-attachments/assets/579eb786-73dc-4cdb-bd2a-8dde30074015" />
+
 ```
 
 ---
