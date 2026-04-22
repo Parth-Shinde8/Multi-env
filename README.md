@@ -19,9 +19,13 @@ This project demonstrates a complete DevOps workflow where application code is a
 
 ## 🏗️ Architecture
 
-
-<img src="images/multienv.png" width="800"/>
-
+```
+GitHub → GitHub Actions → Docker Build → AWS ECR → Kubernetes (k3s)
+                                               ↓
+                                     Helm Deployments
+                                               ↓
+                                Blue-Green Production Strategy
+```
 
 ---
 
@@ -163,8 +167,4 @@ Configured in GitHub Actions:
 * Alerting system (Slack/Email)
 * Manual approval gates for production
 * Canary deployments
-
-
-
-
 
