@@ -1,8 +1,10 @@
-name: DevOps CI/CD Pipeline
+name: Multi-Env DevOps Pipeline
 
 on:
   push:
     branches:
+      - dev
+      - staging
       - main
 
 env:
@@ -11,12 +13,19 @@ env:
   ECR_REGISTRY: 836479503728.dkr.ecr.ap-south-1.amazonaws.com
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+
+      - name: Generate Image Tag
+        id: meta
+        run: |
+          TAG="v${{ github.run_number }}-${{ github.sha }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
@@ -25,25 +34,30 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
+      - name: Login to ECR
         run: |
           aws ecr get-login-password --region $AWS_REGION | \
           docker login --username AWS --password-stdin $ECR_REGISTRY
 
-      - name: Build Docker Image
+      - name: Build Image
         run: |
-          docker build -t devops-app:${{ github.sha }} ./app
+          docker build -t $ECR_REPOSITORY:${{ steps.meta.outputs.tag }} ./app
 
       - name: Tag Image
         run: |
-          docker tag devops-app:${{ github.sha }} \
-          $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          docker tag $ECR_REPOSITORY:${{ steps.meta.outputs.tag }} \
+          $ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.tag }}
 
-      - name: Push Image to ECR
+      - name: Push Image
         run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.tag }}
 
-      - name: Deploy to EC2 (Dev Environment)
+  deploy-dev:
+    needs: build
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Dev
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.EC2_IP }}
@@ -51,5 +65,78 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ~/devops-chart
-            sed -i 's/tag:.*/tag: "${{ github.sha }}"/' values-dev.yaml
+            sed -i 's/tag:.*/tag: "${{ needs.build.outputs.image_tag }}"/' values-dev.yaml
             helm upgrade dev-release . -n dev -f values-dev.yaml
+
+  deploy-staging:
+    needs: build
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Staging
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/devops-chart
+            sed -i 's/tag:.*/tag: "${{ needs.build.outputs.image_tag }}"/' values-staging.yaml
+            helm upgrade staging-release . -n staging -f values-staging.yaml
+
+  deploy-prod:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Prod (Blue-Green + Auto Rollback)
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/devops-chart
+
+            echo "🚀 Deploying GREEN version"
+
+            sed -i 's/tag:.*/tag: "${{ needs.build.outputs.image_tag }}"/' values-prod.yaml
+            sed -i 's/color:.*/color: green/' values-prod.yaml
+            helm upgrade prod-green . -n prod -f values-prod.yaml
+
+            echo "⏳ Waiting for pods..."
+            sleep 20
+
+            SERVICE_IP=$(kubectl get svc prod-service -n prod -o jsonpath='{.spec.clusterIP}')
+
+            echo "🔍 Running health check..."
+            curl -f http://$SERVICE_IP:3000 || FAILED=true
+
+            if [ "$FAILED" = true ]; then
+              echo "❌ Health check failed → Rolling back to BLUE"
+              kubectl patch svc prod-service -n prod --type='json' -p='[
+                {
+                  "op": "replace",
+                  "path": "/spec/selector",
+                  "value": {
+                    "app.kubernetes.io/name": "devops-chart",
+                    "app.kubernetes.io/instance": "prod-blue",
+                    "color": "blue"
+                  }
+                }
+              ]'
+              exit 1
+            else
+              echo "✅ Health check passed → Switching to GREEN"
+              kubectl patch svc prod-service -n prod --type='json' -p='[
+                {
+                  "op": "replace",
+                  "path": "/spec/selector",
+                  "value": {
+                    "app.kubernetes.io/name": "devops-chart",
+                    "app.kubernetes.io/instance": "prod-green",
+                    "color": "green"
+                  }
+                }
+              ]'
+            fi
