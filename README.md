@@ -19,9 +19,9 @@ This project demonstrates a complete DevOps workflow where application code is a
 
 ## 🏗️ Architecture
 
-```
 
-```
+<img src="images/multienv.png" width="800"/>
+
 
 ---
 
