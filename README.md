@@ -20,6 +20,7 @@ This project demonstrates a complete DevOps workflow where application code is a
 ## 🏗️ Architecture
 
 ```
+<img width="1536" height="1024" alt="multienv" src="https://github.com/user-attachments/assets/421efe9c-00a6-41f8-a73c-67e34f5a85fb" />
 
 ```
 
