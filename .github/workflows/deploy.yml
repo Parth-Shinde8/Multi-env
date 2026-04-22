@@ -16,7 +16,7 @@ jobs:
 build:
 runs-on: ubuntu-latest
 
-```
+
 outputs:
   image_tag: ${{ steps.meta.outputs.tag }}
 
@@ -54,14 +54,14 @@ steps:
   - name: Push Image
     run: |
       docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.tag }}
-```
+
 
 deploy-dev:
 needs: build
 if: github.ref == 'refs/heads/dev'
 runs-on: ubuntu-latest
 
-```
+
 steps:
   - name: Deploy to Dev
     uses: appleboy/ssh-action@v1.0.0
@@ -73,14 +73,14 @@ steps:
         cd ~/devops-chart
         sed -i 's/tag:.*/tag: "${{ needs.build.outputs.image_tag }}"/' values-dev.yaml
         helm upgrade dev-release . -n dev -f values-dev.yaml
-```
+
 
 deploy-staging:
 needs: build
 if: github.ref == 'refs/heads/staging'
 runs-on: ubuntu-latest
 
-```
+
 steps:
   - name: Deploy to Staging
     uses: appleboy/ssh-action@v1.0.0
@@ -92,14 +92,13 @@ steps:
         cd ~/devops-chart
         sed -i 's/tag:.*/tag: "${{ needs.build.outputs.image_tag }}"/' values-staging.yaml
         helm upgrade staging-release . -n staging -f values-staging.yaml
-```
+
 
 deploy-prod:
 needs: build
 if: github.ref == 'refs/heads/main'
 runs-on: ubuntu-latest
 
-```
 steps:
   - name: Deploy to Prod (Blue-Green + Auto Rollback)
     uses: appleboy/ssh-action@v1.0.0
@@ -155,6 +154,6 @@ steps:
             }
           ]'
         fi
-```
+
 
    
